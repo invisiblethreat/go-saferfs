@@ -3,11 +3,23 @@ package saferfs
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"sync"
 	"time"
 )
+
+// This is in response to https://github.com/golang/go/issues/19695
+// TempDir ensures that a path exists and is accessable before returning. This
+// is important for things like Docker containers that are derived from the
+// scratch base image.
+func tempDir() (dir string, err error) {
+	dir = os.TempDir()
+	_, err = os.Stat(dir)
+	if err != nil {
+		return "", err
+	}
+	return dir, nil
+}
 
 // Random number state.
 // We generate random temporary file names so that there's a good
@@ -32,26 +44,6 @@ func nextSuffix() string {
 	return strconv.Itoa(int(1e9 + r%1e9))[1:]
 }
 
-// This is in response to https://github.com/golang/go/issues/19695
-// TempDir ensures that a path exists and is accessable before returning. This
-// is important for things like Docker containers that are derived from the
-// scratch base image.
-func TempDir() (dir string, err error) {
-	dir = os.Getenv("TMPDIR")
-	if dir == "" {
-		if runtime.GOOS == "android" {
-			dir = "/data/local/tmp"
-		} else {
-			dir = "/tmp"
-		}
-	}
-	_, err = os.Stat(dir)
-	if err != nil {
-		return "", err
-	}
-	return dir, nil
-}
-
 // TempFile creates a new temporary file in the directory dir
 // with a name beginning with prefix, opens the file for reading
 // and writing, and returns the resulting *os.File.
@@ -63,10 +55,13 @@ func TempDir() (dir string, err error) {
 // to remove the file when no longer needed.
 func TempFile(dir, prefix string) (f *os.File, err error) {
 	if dir == "" {
-		dir, err = TempDir()
-		if err != nil {
-			return nil, err
-		}
+		dir, err = tempDir()
+	} else {
+		_, err = os.Stat(dir)
+	}
+
+	if err != nil {
+		return nil, err
 	}
 
 	nconflict := 0
@@ -80,6 +75,51 @@ func TempFile(dir, prefix string) (f *os.File, err error) {
 				randmu.Unlock()
 			}
 			continue
+		}
+		break
+	}
+	return
+}
+
+// Originally from 'ioutil', but used 'os.TempDir' which doesn't check for the
+// path existing prior to usage.
+// TempDir creates a new temporary directory in the directory dir
+// with a name beginning with prefix and returns the path of the
+// new directory. If dir is the empty string, TempDir uses the
+// default directory for temporary files (see os.TempDir).
+// Multiple programs calling TempDir simultaneously
+// will not choose the same directory. It is the caller's responsibility
+// to remove the directory when no longer needed.
+func TempDir(dir, prefix string) (name string, err error) {
+	if dir == "" {
+		dir, err = tempDir()
+	} else {
+		_, err = os.Stat(dir)
+	}
+
+	if err != nil {
+		return "", err
+	}
+
+	nconflict := 0
+	for i := 0; i < 10000; i++ {
+		try := filepath.Join(dir, prefix+nextSuffix())
+		err = os.Mkdir(try, 0700)
+		if os.IsExist(err) {
+			if nconflict++; nconflict > 10 {
+				randmu.Lock()
+				rand = reseed()
+				randmu.Unlock()
+			}
+			continue
+		}
+		if os.IsNotExist(err) {
+			if _, err := os.Stat(dir); os.IsNotExist(err) {
+				return "", err
+			}
+		}
+		if err == nil {
+			name = try
 		}
 		break
 	}
