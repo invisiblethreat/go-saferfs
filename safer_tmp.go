@@ -8,19 +8,6 @@ import (
 	"time"
 )
 
-// This is in response to https://github.com/golang/go/issues/19695
-// TempDir ensures that a path exists and is accessable before returning. This
-// is important for things like Docker containers that are derived from the
-// scratch base image.
-func tempDir() (dir string, err error) {
-	dir = os.TempDir()
-	_, err = os.Stat(dir)
-	if err != nil {
-		return "", err
-	}
-	return dir, nil
-}
-
 // Random number state.
 // We generate random temporary file names so that there's a good
 // chance the file doesn't exist yet - keeps the number of tries in
@@ -55,12 +42,10 @@ func nextSuffix() string {
 // to remove the file when no longer needed.
 func TempFile(dir, prefix string) (f *os.File, err error) {
 	if dir == "" {
-		dir, err = tempDir()
-	} else {
-		_, err = os.Stat(dir)
+		dir = os.TempDir()
 	}
 
-	if err != nil {
+	if _, err := os.Stat(dir); err != nil {
 		return nil, err
 	}
 
@@ -92,15 +77,12 @@ func TempFile(dir, prefix string) (f *os.File, err error) {
 // to remove the directory when no longer needed.
 func TempDir(dir, prefix string) (name string, err error) {
 	if dir == "" {
-		dir, err = tempDir()
-	} else {
-		_, err = os.Stat(dir)
+		dir = os.TempDir()
 	}
 
-	if err != nil {
+	if _, err := os.Stat(dir); err != nil {
 		return "", err
 	}
-
 	nconflict := 0
 	for i := 0; i < 10000; i++ {
 		try := filepath.Join(dir, prefix+nextSuffix())
