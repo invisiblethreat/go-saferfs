@@ -11,6 +11,6 @@ design decisions that could not have anticipated these changes.
 
 ## Functions
 
-### `TempDir() (s string, err error)`
+### `TempDir() (dir string, err error)`
 This function reads the environment variable `TMPDIR`, which, if empty, defaults
 to hardcoded paths. Before returning, the existence of the path is verified.
